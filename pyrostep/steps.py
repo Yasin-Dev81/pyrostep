@@ -156,56 +156,38 @@ def listen(
 
 async def register_next_step(
     id: int,
-    _next: typing.Any,
-    store: typing.Optional[MetaStore] = None,
+    _next: typing.Callable[..., typing.Awaitable],
+    store: typing.Optional['MetaStore'] = None,
     *,
     args: tuple = (),
-    kwargs: dict = {},
+    kwargs: typing.Optional[dict] = None,
     timeout: typing.Optional[float] = None,
-    timeout_func = None
+    timeout_func: typing.Optional[typing.Callable[..., typing.Awaitable]] = None,
+    timeout_func_args: tuple = (),
+    timeout_func_kwargs: typing.Optional[dict] = None
 ) -> None:
-    """
-    register next step for user/chat with optional timeout.
+    kwargs = kwargs or {}
+    timeout_func_kwargs = timeout_func_kwargs or {}
 
-    Parameters:
-        id: User or chat ID to register the step for
-        _next: Function to call on the next update
-        store: Optional custom MetaStore to use
-        args: Arguments to pass to the next function
-        kwargs: Keyword arguments to pass to the next function
-        timeout: Optional timeout in seconds. If set, the step will be automatically
-                unregistered after the specified time.
-
-    Example::
-
-        async def step1(client, msg):
-            # code ...
-            await register_next_step(msg.from_user.id, step2, timeout=60)  # 60 seconds timeout
-
-        async def step2(client, msg):
-            # code ...
-    """
     if args or kwargs:
         _next = functools.partial(_next, *args, **kwargs)
 
     store = store or root
     await store.set_item(id, _next)
-    
-    # If timeout is specified, schedule automatic unregistration
+
     if timeout is not None:
         async def timeout_handler():
             await asyncio.sleep(timeout)
             try:
-                # Only unregister if the current handler is still our function
                 current = await store.pop_item(id)
-                if not current == _next:
+                if current == _next:
+                    if timeout_func:
+                        asyncio.create_task(timeout_func(*timeout_func_args, **timeout_func_kwargs))
+                else:
                     await store.set_item(id, current)
             except KeyError:
-                # Already unregistered, nothing to do
-                if timeout_func:
-                    asyncio.create_task(timeout_func())
-        
-        # Start the timeout task without awaiting it
+                pass
+            
         asyncio.create_task(timeout_handler())
 
 
