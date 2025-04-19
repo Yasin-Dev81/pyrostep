@@ -161,15 +161,25 @@ async def register_next_step(
     *,
     args: tuple = (),
     kwargs: dict = {},
+    timeout: typing.Optional[float] = None,
 ) -> None:
     """
-    register next step for user/chat.
+    register next step for user/chat with optional timeout.
+
+    Parameters:
+        id: User or chat ID to register the step for
+        _next: Function to call on the next update
+        store: Optional custom MetaStore to use
+        args: Arguments to pass to the next function
+        kwargs: Keyword arguments to pass to the next function
+        timeout: Optional timeout in seconds. If set, the step will be automatically
+                unregistered after the specified time.
 
     Example::
 
         async def step1(client, msg):
             # code ...
-            register_next_step(msg.from_user.id, step2)
+            await register_next_step(msg.from_user.id, step2, timeout=60)  # 60 seconds timeout
 
         async def step2(client, msg):
             # code ...
@@ -177,7 +187,28 @@ async def register_next_step(
     if args or kwargs:
         _next = functools.partial(_next, *args, **kwargs)
 
-    await (store or root).set_item(id, _next)
+    store = store or root
+    await store.set_item(id, _next)
+    
+    # If timeout is specified, schedule automatic unregistration
+    if timeout is not None:
+        async def timeout_handler():
+            await asyncio.sleep(timeout)
+            try:
+                # Only unregister if the current handler is still our function
+                current = await store.pop_item(id)
+                if current == _next:
+                    # Successfully unregistered after timeout
+                    pass
+                else:
+                    # Not our handler anymore, put it back
+                    await store.set_item(id, current)
+            except KeyError:
+                # Already unregistered, nothing to do
+                pass
+        
+        # Start the timeout task without awaiting it
+        asyncio.create_task(timeout_handler())
 
 
 async def unregister_steps(id: int, store: typing.Optional[MetaStore] = None) -> None:
