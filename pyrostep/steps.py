@@ -162,6 +162,7 @@ async def register_next_step(
     args: tuple = (),
     kwargs: dict = {},
     timeout: typing.Optional[float] = None,
+    timeout_func = None
 ) -> None:
     """
     register next step for user/chat with optional timeout.
@@ -197,15 +198,12 @@ async def register_next_step(
             try:
                 # Only unregister if the current handler is still our function
                 current = await store.pop_item(id)
-                if current == _next:
-                    # Successfully unregistered after timeout
-                    pass
-                else:
-                    # Not our handler anymore, put it back
+                if not current == _next:
                     await store.set_item(id, current)
             except KeyError:
                 # Already unregistered, nothing to do
-                pass
+                if timeout_func:
+                    asyncio.create_task(timeout_func())
         
         # Start the timeout task without awaiting it
         asyncio.create_task(timeout_handler())
